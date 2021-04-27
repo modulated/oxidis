@@ -1,9 +1,12 @@
+use oxidis::configuration::get_configuration;
+use sqlx::{SqliteConnection, Connection};
+
 // Spawn background instance of application on random port and return address
 fn spawn_app() -> String {
     let listener = std::net::TcpListener::bind("localhost:0")
         .expect("Failed to bind random port.");
     let port = listener.local_addr().unwrap().port();
-    let server = oxidis::run(listener).expect("Failed to bind address.");
+    let server = oxidis::startup::run(listener,).expect("Failed to bind address.");
     let _ = tokio::spawn(server);
     format!("http://localhost:{}", port)
 }
@@ -25,6 +28,12 @@ async fn health_check_test() {
 #[actix_rt::test]
 async fn subscribe_returns_200_for_valid_form_data() {
     let app_address = spawn_app();
+    let config = get_configuration().expect("Failed to read config.");
+    let database_url = config.database.connection_string();
+    let mut connection = SqliteConnection::connect(&database_url)
+        .await
+        .expect("Failed to connect to database.");
+
     let client = reqwest::Client::new();
     let body = "name=Cuck%20Lord&email=fuck%40off.com";
 
@@ -37,6 +46,14 @@ async fn subscribe_returns_200_for_valid_form_data() {
         .expect("Failed to execute request.");
 
     assert_eq!(200, response.status().as_u16());
+
+    let saved = sqlx::query!("SELECT email, name FROM subscriptions",)
+        .fetch_one(&mut connection)
+        .await
+        .expect("Failed to fetch saved subscription.");
+
+    assert_eq!(saved.name, "Cuck Lord");
+    assert_eq!(saved.email, "fuck@off.com");
 }
 
 #[actix_rt::test]
